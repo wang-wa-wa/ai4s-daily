@@ -1,0 +1,7 @@
+config.json
+state.json
+run.log
+digest_preview.html
+test_config.json
+__pycache__/
+*.pyc

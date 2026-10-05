@@ -1,0 +1,37 @@
+{
+  "recipient": "rjwang22@163.com",
+  "days_back": 3,
+  "max_papers": 12,
+  "fetch_per_query": 60,
+  "send_when_empty": false,
+  "smtp": {
+    "host": "smtp.163.com",
+    "port": 465,
+    "user": "rjwang22@163.com",
+    "key": "本地运行在此填163邮箱SMTP授权码；云端运行由环境变量 AI4S_SMTP_KEY 注入"
+  },
+  "llm": {
+    "enabled": false,
+    "api_base": "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+    "api_key": "本地运行在此填智谱API Key；云端运行由环境变量 AI4S_LLM_API_KEY 注入",
+    "model": "glm-5.3-flash"
+  },
+  "keywords": {
+    "molecule": [
+      "small molecule", "drug discovery", "drug design", "de novo design",
+      "molecular generation", "molecule generation", "molecular property",
+      "property prediction", "virtual screening", "docking", "retrosynthesis",
+      "synthesis planning", "reaction prediction", "chemical space",
+      "molecular dynamics", "molecular conformation", "scaffold", "SMILES",
+      "molecular graph", "chemical reaction", "ligand", "binding affinity",
+      "ADMET", "solubility", "toxicity"
+    ],
+    "ai": [
+      "machine learning", "deep learning", "neural network",
+      "artificial intelligence", "language model", "foundation model",
+      "generative model", "graph neural", "reinforcement learning",
+      "transformer", "diffusion model", "self-supervised", "contrastive learning",
+      "active learning", "AI", "LLM", "GNN"
+    ]
+  }
+}
