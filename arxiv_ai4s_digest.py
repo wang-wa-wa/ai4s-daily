@@ -70,20 +70,20 @@ DEFAULT_CONFIG = {
     },
     "keywords": {
         "molecule": [
-            "small molecule", "drug discovery", "drug design", "de novo design",
-            "molecular generation", "molecule generation", "molecular property",
-            "property prediction", "virtual screening", "docking", "retrosynthesis",
-            "synthesis planning", "reaction prediction", "chemical space",
-            "molecular dynamics", "molecular conformation", "scaffold", "SMILES",
-            "molecular graph", "chemical reaction", "ligand", "binding affinity",
-            "ADMET", "solubility", "toxicity"
+            "molecular property", "property prediction", "multi-task property",
+            "ADMET", "toxicity", "solubility", "binding affinity",
+            "molecular graph", "molecular representation", "SMILES", "ligand",
+            "atom attribution", "substructure attribution", "molecular explanation",
+            "rationale extraction", "chemical interpretation", "scaffold explanation"
         ],
         "ai": [
             "machine learning", "deep learning", "neural network",
-            "artificial intelligence", "language model", "foundation model",
-            "generative model", "graph neural", "reinforcement learning",
-            "transformer", "diffusion model", "self-supervised", "contrastive learning",
-            "active learning", "AI", "LLM", "GNN"
+            "graph neural network", "GNN explanation", "graph explanation",
+            "interpretability", "explainability", "explainable AI", "XAI",
+            "attribution", "feature importance", "SHAP", "LIME",
+            "attention explanation", "attention visualization",
+            "post-hoc explanation", "model interpretation",
+            "self-supervised", "contrastive learning", "transfer learning"
         ]
     }
 }
