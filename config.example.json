@@ -17,15 +17,6 @@
     "model": "glm-5.3-flash"
   },
   "keywords": {
-    "molecule": [
-      "small molecule", "drug discovery", "drug design", "de novo design",
-      "molecular generation", "molecule generation", "molecular property",
-      "property prediction", "virtual screening", "docking", "retrosynthesis",
-      "synthesis planning", "reaction prediction", "chemical space",
-      "molecular dynamics", "molecular conformation", "scaffold", "SMILES",
-      "molecular graph", "chemical reaction", "ligand", "binding affinity",
-      "ADMET", "solubility", "toxicity"
-    ],
     "ai": [
       "machine learning", "deep learning", "neural network",
       "artificial intelligence", "language model", "foundation model",

@@ -70,11 +70,12 @@ DEFAULT_CONFIG = {
     },
     "keywords": {
         "molecule": [
-            "molecular property", "property prediction", "multi-task property",
-            "ADMET", "toxicity", "solubility", "binding affinity",
-            "molecular graph", "molecular representation", "SMILES", "ligand",
-            "atom attribution", "substructure attribution", "molecular explanation",
-            "rationale extraction", "chemical interpretation", "scaffold explanation"
+            "small molecule", "small molecules", "small-molecule", "small-molecules",
+            "molecular generation", "molecule generation", "molecular property",
+            "molecular properties", "molecular graph", "SMILES", "SELFIES",
+            "ADMET", "retrosynthesis", "lead optimization", "scaffold hopping",
+            "organic molecules", "molecular conformer", "ligand design",
+            "compound library", "MoleculeNet", "GuacaMol", "QM9", "ChEMBL"
         ],
         "ai": [
             "machine learning", "deep learning", "neural network",
@@ -217,7 +218,7 @@ def fetch_papers(cfg, days):
     papers, seen = [], set()
     for i in range(0, len(mol), 10):
         chunk = mol[i:i + 10]
-        mol_part = " OR ".join('abs:"%s"' % k for k in chunk)
+        mol_part = " OR ".join('ti:"%s" OR abs:"%s"' % (k, k) for k in chunk)
         q = f"({mol_part}) AND ({ai_part})"
         url = ARXIV_API + "?" + urllib.parse.urlencode({
             "search_query": q, "sortBy": "submittedDate",
@@ -254,8 +255,29 @@ def fetch_papers(cfg, days):
     return papers
 
 
+TARGET_TASK = re.compile(
+    r"\b(?:targets? (?:discovery|identification|prediction|prioriti[sz]ation|validation)|"
+    r"(?:discover(?:y|ing)|identif(?:y|ying|ication)|predict(?:ing|ion)?|prioriti[sz](?:ing|ation)) "
+    r"(?:of )?(?:(?:new|novel|potential|therapeutic|drug|protein|molecular) )*targets?|"
+    r"drug[ -]target interactions?|target deconvolution|"
+    r"(?:protein|antibody|peptide) (?:structure prediction|folding|design|generation)|"
+    r"(?:antibod(?:y|ies)|peptides?|proteins?) engineering|"
+    r"(?:predict(?:ing|ion)?|design(?:ing)?|generat(?:ing|ion)) (?:of )?(?:novel )?"
+    r"(?:antibodies|peptides|proteins|protein structures)|"
+    r"(?:binding sites?|binding pockets?) (?:prediction|detection|identification))\b"
+)
+
+
 def score_paper(p, mol_terms, ai_terms):
     title, abstract = p["title"].lower(), p["abstract"].lower()
+    # A target in the background is fine. Reject papers whose stated task is target-centric.
+    if TARGET_TASK.search(title.replace("-", " ")):
+        return -1
+    for sentence in re.split(r"[.!?]\s+", abstract.replace("-", " ")):
+        objective = re.search(r"\b(?:we (?:present|propose|introduce|develop|aim|predict|identify)|"
+                              r"(?:this|our) (?:work|study|method|model) (?:aims|focuses))\b", sentence)
+        if objective and TARGET_TASK.search(sentence, objective.start()):
+            return -1
     mol_hits = [t for t in mol_terms if term_found(t, title) or term_found(t, abstract)]
     ai_hits = [t for t in ai_terms if term_found(t, title) or term_found(t, abstract)]
     if not mol_hits or not ai_hits:
