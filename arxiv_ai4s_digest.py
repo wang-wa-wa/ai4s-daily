@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """AI4S 小分子日报
 
-从 arXiv 抓取最近几天「小分子 / 药物发现 + AI」方向的新论文，
+从 arXiv 抓取最近几天使用 AI 预测小分子性质的新论文，
 生成中英结合的要点摘要（分类标签、中文一句话看点、英文关键摘录、链接）并发送到邮箱。
 不发送论文全文，只发关键信息。
 
@@ -70,12 +70,11 @@ DEFAULT_CONFIG = {
     },
     "keywords": {
         "molecule": [
-            "small molecule", "small molecules", "small-molecule", "small-molecules",
-            "molecular generation", "molecule generation", "molecular property",
-            "molecular properties", "molecular graph", "SMILES", "SELFIES",
-            "ADMET", "retrosynthesis", "lead optimization", "scaffold hopping",
-            "organic molecules", "molecular conformer", "ligand design",
-            "compound library", "MoleculeNet", "GuacaMol", "QM9", "ChEMBL"
+            "molecular property", "molecular properties", "property prediction",
+            "ADMET", "ADME", "solubility", "lipophilicity", "permeability",
+            "toxicity", "logP", "logD", "pKa", "hydration free energy",
+            "HOMO-LUMO", "quantum chemical properties", "QSPR", "bioavailability",
+            "metabolic stability", "clearance", "plasma protein binding"
         ],
         "ai": [
             "machine learning", "deep learning", "neural network",
@@ -196,7 +195,7 @@ def load_state():
 
 def save_state(sent):
     cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%d")
-    sent = {k: v for k, v in sent.items() if v >= cutoff}
+    sent = {k: v for k, v in sent.items() if v >= cutoff or k.startswith("doi:")}
     try:
         with open(STATE_FILE, "w", encoding="utf-8") as f:
             json.dump({"sent": sent}, f, ensure_ascii=False, indent=2)
@@ -268,17 +267,54 @@ TARGET_TASK = re.compile(
 )
 
 
+MOLECULE_CONTEXT = re.compile(
+    r"\b(?:molecul(?:e|es|ar)|compounds?|smiles|selfies|chembl|qm9|moleculenet|"
+    r"admet?|qspr|organic chemicals?|drug like|drug candidates?)\b"
+)
+OTHER_FOCUS = re.compile(
+    r"\b(?:(?<!plasma )proteins?|antibod(?:y|ies)|peptides?|polymers?|crystals?|nanoparticles?|"
+    r"retrosynth\w*|docking|virtual screening|inverse design|"
+    r"(?:drug|molecul\w*|ligand) (?:generation|design|optimization)|"
+    r"generat(?:ing|ion of) (?:novel )?(?:small )?molecules|property (?:guided|conditioned) generation)\b"
+)
+PROPERTY = re.compile(
+    r"\b(?:propert(?:y|ies)|admet?|solubility|lipophilicity|permeability|"
+    r"toxicity|log\s?[pd]|pka|hydration free energy|homo lumo(?: gap)?|"
+    r"bioavailability|metabolic stability|clearance|plasma protein binding)\b"
+)
+PREDICT = re.compile(r"\b(?:predict\w*|estimat\w*|forecast\w*|regress\w*)\b")
+STUDY_CUE = re.compile(r"\b(?:we|here|this (?:work|study|paper)|our (?:model|method)|"
+                       r"trained to|evaluated on|benchmark\w*)\b")
+
+
+def property_task(text):
+    if re.search(r"\bqspr\b", text):
+        return True
+    return any(abs(prop.start() - pred.start()) < 90
+               for prop in PROPERTY.finditer(text) for pred in PREDICT.finditer(text))
+
+
 def score_paper(p, mol_terms, ai_terms):
     title, abstract = p["title"].lower(), p["abstract"].lower()
-    # A target in the background is fine. Reject papers whose stated task is target-centric.
-    if TARGET_TASK.search(title.replace("-", " ")):
+    title = title.replace("-", " ")
+    abstract = abstract.replace("-", " ")
+    if OTHER_FOCUS.search(title) or not MOLECULE_CONTEXT.search(title + " " + abstract):
         return -1
-    for sentence in re.split(r"[.!?]\s+", abstract.replace("-", " ")):
+    if not property_task(title):
+        sentences = re.split(r"[.!?]\s+", abstract)
+        if not any(STUDY_CUE.search(s) and property_task(s) for s in sentences):
+            return -1
+    # A target in the background is fine. Reject papers whose stated task is target-centric.
+    if TARGET_TASK.search(title):
+        return -1
+    for sentence in re.split(r"[.!?]\s+", abstract):
         objective = re.search(r"\b(?:we (?:present|propose|introduce|develop|aim|predict|identify)|"
                               r"(?:this|our) (?:work|study|method|model) (?:aims|focuses))\b", sentence)
-        if objective and TARGET_TASK.search(sentence, objective.start()):
+        if objective and (TARGET_TASK.search(sentence, objective.start())
+                          or OTHER_FOCUS.search(sentence[objective.start():])
+                          and not property_task(title)):
             return -1
-    mol_hits = [t for t in mol_terms if term_found(t, title) or term_found(t, abstract)]
+    mol_hits = [t for t in mol_terms if term_found(t.replace("-", " "), title + " " + abstract)]
     ai_hits = [t for t in ai_terms if term_found(t, title) or term_found(t, abstract)]
     if not mol_hits or not ai_hits:
         return -1
@@ -352,10 +388,10 @@ def llm_summarize(llm_cfg, title, abstract):
     if _LLM_DISABLED:
         return None, None
     prompt = (
-        "你是 AI4S（小分子药物发现）领域的论文摘要助手。根据下面的标题与摘要，"
+        "你是小分子性质预测领域的论文摘要助手。根据下面的标题与摘要，"
         "严格只输出一行 JSON，不要输出任何其他文字："
         '{"point": "中文一句话看点，60字以内，概括方法与用途，可保留 diffusion、GNN 等英文术语", '
-        '"tags": ["中英文标签，如: 分子生成 Molecular Generation", "最多3个"]}\n'
+        '"tags": ["中英文标签，如: 溶解度预测 Solubility Prediction", "最多3个"]}\n'
         f"标题: {title}\n摘要: {abstract[:2500]}"
     )
     payload = json.dumps({
@@ -439,9 +475,23 @@ HTML_HEAD = """<!DOCTYPE html><html><head><meta charset="utf-8">
 """
 
 
-def build_html(entries, days, total_rel):
+READING_LIST = [
+    ("2024-11-12", "MolE: a foundation model for molecular graphs using disentangled attention",
+     "先在约 8.42 亿个分子图上预训练，再用少量标注数据微调。可重点看作者如何比较 22 项 ADMET 任务。",
+     "10.1038/s41467-024-53751-y"),
+    ("2025-05-12", "A self-conformation-aware pre-training framework for molecular property "
+     "prediction with substructure interpretability",
+     "SCAGE 将构象信息引入预训练。可对照溶解度、亲脂性和毒性任务，看哪些子结构影响了模型的预测。",
+     "10.1038/s41467-025-59634-0"),
+    ("2024-08-19", "Data-driven quantum chemical property prediction leveraging 3D conformations with Uni-Mol+",
+     "Uni-Mol+ 从粗略的三维构象出发，逐步调整原子位置。可重点看构象精度如何影响小分子的 HOMO–LUMO 能隙预测。",
+     "10.1038/s41467-024-51321-w"),
+]
+
+
+def build_html(entries, days, total_rel, readings=()):
     gen = datetime.now().strftime("%Y-%m-%d %H:%M")
-    parts = [HTML_HEAD, "<h2>AI4S 小分子日报</h2>",
+    parts = [HTML_HEAD, "<h2>AI4S 小分子性质预测日报</h2>",
              f'<p class="summary">检索到 {total_rel} 篇相关论文，精选 {len(entries)} 篇 · '
              f"回看 {days} 天 · 生成于 {gen}</p>"]
     for e in entries:
@@ -456,12 +506,17 @@ def build_html(entries, days, total_rel):
   <p class="links">摘要页: <a href="{e['url']}">{e['url']}</a>
      | PDF: <a href="{e['pdf']}">arxiv.org/pdf/{escape(e['arxiv_id'])}</a></p>
 </div>""")
+    if readings:
+        parts.append("<h2>近三年代表作 · 对照阅读</h2>")
+        for date, title, note, doi in readings:
+            parts.append(f'<div class="paper"><h3><a href="https://doi.org/{doi}">{escape(title)}</a>'
+                         f'</h3><p class="meta">{date} · Nature Communications</p><p>{escape(note)}</p></div>')
     parts.append("</body></html>")
     return "".join(parts)
 
 
-def build_text(entries, days, total_rel):
-    lines = [f"AI4S 小分子日报（精选 {len(entries)} 篇 / 相关 {total_rel} 篇，回看 {days} 天）", ""]
+def build_text(entries, days, total_rel, readings=()):
+    lines = [f"AI4S 小分子性质预测日报（精选 {len(entries)} 篇 / 相关 {total_rel} 篇，回看 {days} 天）", ""]
     for e in entries:
         lines += [
             f"{e['no']}. {e['title']}",
@@ -471,6 +526,10 @@ def build_text(entries, days, total_rel):
             f"   摘录: {e['excerpt']}",
             f"   {e['url']}", "",
         ]
+    if readings:
+        lines.append("近三年代表作 · 对照阅读")
+        for date, title, note, doi in readings:
+            lines.extend([title, f"{date} · Nature Communications", note, f"https://doi.org/{doi}", ""])
     return "\n".join(lines)
 
 
@@ -545,9 +604,15 @@ def main():
 
     entries = build_entries(selected, cfg)
     today = datetime.now().strftime("%Y-%m-%d")
-    subject = f"【AI4S小分子日报】{today} · {len(entries)} 篇新论文"
-    html = build_html(entries, days, total_rel)
-    text = build_text(entries, days, total_rel)
+    # ISO date strings permit a calendar-year cutoff even when today is February 29.
+    now = datetime.now(timezone.utc).date()
+    cutoff = f"{now.year - 3:04d}-{now.month:02d}-{now.day:02d}"
+    readings = [r for r in READING_LIST if cutoff <= r[0] <= now.isoformat() and "doi:" + r[3] not in sent]
+    subject = f"【AI4S小分子性质预测】{today} · {len(entries)} 篇新论文"
+    if readings:
+        subject += f" + {len(readings)} 篇代表作"
+    html = build_html(entries, days, total_rel, readings)
+    text = build_text(entries, days, total_rel, readings)
 
     preview = os.path.join(SCRIPT_DIR, "digest_preview.html")
     with open(preview, "w", encoding="utf-8") as f:
@@ -569,6 +634,8 @@ def main():
     ok = send_email(cfg, subject, html, text)
     log_line("sent" if ok else "failed", f"{len(entries)} papers")
     if ok:
+        for _, _, _, doi in readings:
+            sent["doi:" + doi] = today
         for e in entries:
             sent[e["arxiv_id"]] = today
         save_state(sent)
