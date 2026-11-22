@@ -44,7 +44,7 @@ from datetime import datetime, timedelta, timezone
 from email.header import Header
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from html import escape
+from html import escape, unescape
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 ATOM = "{http://www.w3.org/2005/Atom}"
@@ -478,15 +478,68 @@ HTML_HEAD = """<!DOCTYPE html><html><head><meta charset="utf-8">
 READING_LIST = [
     ("2024-11-12", "MolE: a foundation model for molecular graphs using disentangled attention",
      "先在约 8.42 亿个分子图上预训练，再用少量标注数据微调。可重点看作者如何比较 22 项 ADMET 任务。",
-     "10.1038/s41467-024-53751-y"),
+     "Nature Communications", "10.1038/s41467-024-53751-y"),
     ("2025-05-12", "A self-conformation-aware pre-training framework for molecular property "
      "prediction with substructure interpretability",
      "SCAGE 将构象信息引入预训练。可对照溶解度、亲脂性和毒性任务，看哪些子结构影响了模型的预测。",
-     "10.1038/s41467-025-59634-0"),
+     "Nature Communications", "10.1038/s41467-025-59634-0"),
     ("2024-08-19", "Data-driven quantum chemical property prediction leveraging 3D conformations with Uni-Mol+",
      "Uni-Mol+ 从粗略的三维构象出发，逐步调整原子位置。可重点看构象精度如何影响小分子的 HOMO–LUMO 能隙预测。",
-     "10.1038/s41467-024-51321-w"),
+     "Nature Communications", "10.1038/s41467-024-51321-w"),
 ]
+
+
+def select_readings(sent, entries, cfg, now):
+    if not entries:
+        return []
+    # A leap-day anniversary falls on February 28 in the earlier year.
+    day = 28 if (now.month, now.day) == (2, 29) else now.day
+    cutoff = now.replace(year=now.year - 3, day=day).isoformat()
+    titles = {re.sub(r"\W", "", e["title"].casefold()) for e in entries}
+    seeds = [r for r in READING_LIST if cutoff <= r[0] <= now.isoformat()
+             and "doi:" + r[-1] not in sent and re.sub(r"\W", "", r[1].casefold()) not in titles]
+    if seeds:
+        return seeds
+
+    topics = ('TITLE:"molecular property" OR TITLE:"molecular properties" OR TITLE:ADMET '
+              'OR TITLE:QSPR OR TITLE:solubility OR TITLE:lipophilicity OR TITLE:permeability '
+              'OR TITLE:"quantum chemical properties"')
+    query = (f"({topics}) AND FIRST_PDATE:[{cutoff} TO {now.isoformat()}] AND SRC:MED "
+             "AND CITED:[10 TO *] AND NOT PUB_TYPE:\"Retracted Publication\" sort_cited:y")
+    cursor = "*"
+    try:
+        while cursor:
+            params = urllib.parse.urlencode(dict(query=query, format="json", resultType="core",
+                                                pageSize=50, cursorMark=cursor))
+            url = "https://www.ebi.ac.uk/europepmc/webservices/rest/search?" + params
+            with urllib.request.urlopen(url, timeout=20) as response:
+                page = json.load(response)
+            rows = page["resultList"]["result"]
+            for row in rows:
+                doi = (row.get("doi") or "").lower().strip()
+                date = row.get("firstPublicationDate") or ""
+                title = unescape(re.sub(r"<[^>]+>", "", row.get("title") or "")).strip()
+                if (not re.fullmatch(r"10\.\d{4,9}/\S+", doi) or "doi:" + doi in sent
+                        or not cutoff <= date <= now.isoformat()
+                        or re.sub(r"\W", "", title.casefold()) in titles
+                        or re.search(r"\b(correction|erratum|retraction)\b", title, re.I)):
+                    continue
+                abstract = unescape(re.sub(r"<[^>]+>", " ", row.get("abstractText") or ""))
+                paper = dict(title=title, abstract=abstract)
+                keywords = cfg["keywords"]
+                if (not property_task(title.lower().replace("-", " "))
+                        or score_paper(paper, keywords["molecule"], keywords["ai"]) < 0):
+                    continue
+                journal = row.get("journalInfo", {}).get("journal", {}).get("title", "")
+                note = f"入选依据：小分子性质预测主题匹配，Europe PMC 收录的引用次数为 {row['citedByCount']}。"
+                return [(date, title, note, journal, doi)]
+            next_cursor = page.get("nextCursorMark")
+            if not rows or next_cursor == cursor:
+                break
+            cursor = next_cursor
+    except (OSError, ValueError, KeyError) as exc:
+        print(f"[提示] 本次代表作检索失败，继续生成新论文日报：{exc}")
+    return []
 
 
 def build_html(entries, days, total_rel, readings=()):
@@ -508,9 +561,9 @@ def build_html(entries, days, total_rel, readings=()):
 </div>""")
     if readings:
         parts.append("<h2>近三年代表作 · 对照阅读</h2>")
-        for date, title, note, doi in readings:
-            parts.append(f'<div class="paper"><h3><a href="https://doi.org/{doi}">{escape(title)}</a>'
-                         f'</h3><p class="meta">{date} · Nature Communications</p><p>{escape(note)}</p></div>')
+        for date, title, note, journal, doi in readings:
+            parts.append(f'<div class="paper"><h3><a href="https://doi.org/{escape(doi)}">{escape(title)}</a>'
+                         f'</h3><p class="meta">{date} · {escape(journal)}</p><p>{escape(note)}</p></div>')
     parts.append("</body></html>")
     return "".join(parts)
 
@@ -528,8 +581,8 @@ def build_text(entries, days, total_rel, readings=()):
         ]
     if readings:
         lines.append("近三年代表作 · 对照阅读")
-        for date, title, note, doi in readings:
-            lines.extend([title, f"{date} · Nature Communications", note, f"https://doi.org/{doi}", ""])
+        for date, title, note, journal, doi in readings:
+            lines.extend([title, f"{date} · {journal}", note, f"https://doi.org/{doi}", ""])
     return "\n".join(lines)
 
 
@@ -604,10 +657,7 @@ def main():
 
     entries = build_entries(selected, cfg)
     today = datetime.now().strftime("%Y-%m-%d")
-    # ISO date strings permit a calendar-year cutoff even when today is February 29.
-    now = datetime.now(timezone.utc).date()
-    cutoff = f"{now.year - 3:04d}-{now.month:02d}-{now.day:02d}"
-    readings = [r for r in READING_LIST if cutoff <= r[0] <= now.isoformat() and "doi:" + r[3] not in sent]
+    readings = select_readings(sent, entries, cfg, datetime.now(timezone.utc).date())
     subject = f"【AI4S小分子性质预测】{today} · {len(entries)} 篇新论文"
     if readings:
         subject += f" + {len(readings)} 篇代表作"
@@ -634,8 +684,8 @@ def main():
     ok = send_email(cfg, subject, html, text)
     log_line("sent" if ok else "failed", f"{len(entries)} papers")
     if ok:
-        for _, _, _, doi in readings:
-            sent["doi:" + doi] = today
+        for reading in readings:
+            sent["doi:" + reading[-1]] = today
         for e in entries:
             sent[e["arxiv_id"]] = today
         save_state(sent)
